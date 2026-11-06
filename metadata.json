@@ -1,0 +1,6 @@
+{
+  "name": "FuelOptima",
+  "description": "Zero-cost geospatial route reconstructor and mathematical refueling optimizer using OSRM, OpenStreetMap Overpass, Turf.js, and Dynamic/Linear Programming.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
