@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as turf from '@turf/turf';
-import { Maximize2, Minus, Plus, X } from 'lucide-react';
+import { Layers, Maximize2, Minus, Plus, X } from 'lucide-react';
 import { computeMaxStraightLineRadiusKm } from '../lib/geo/overpass';
 import { roundTo } from '../lib/units';
 import { useTripStore } from '../store/useTripStore';
@@ -42,6 +42,8 @@ export const MapCanvas: React.FC = () => {
   const hoveredDistanceKm = useTripStore((s) => s.hoveredDistanceKm);
   const maxDetourMinutes = useTripStore((s) => s.maxDetourMinutes);
   const policy = useTripStore((s) => s.policy);
+
+  const [basemapStyle, setBasemapStyle] = useState<'dark' | 'streets' | 'satellite'>('dark');
 
   const [view, setView] = useState<ViewTransform>({
     centerLng: -76.48,
@@ -211,32 +213,82 @@ export const MapCanvas: React.FC = () => {
     return Math.max(16, Math.min(72, px));
   }, [maxDetourMinutes, view.centerLat, view.zoom]);
 
-  // Graticule / Lat-Lng Tactical Grid lines
-  const gridLines = useMemo(() => {
-    const stepDeg = view.zoom > 8 ? 0.5 : view.zoom > 6 ? 1.0 : 2.0;
-    const lngLines: Array<{ lng: number; x: number }> = [];
-    const latLines: Array<{ lat: number; y: number }> = [];
+  // Visible Web Mercator Basemap Tiles
+  const visibleTiles = useMemo(() => {
+    if (dimensions.width <= 0 || dimensions.height <= 0) return [];
+    const tileZ = Math.max(1, Math.min(18, Math.floor(view.zoom)));
+    const numTiles = 1 << tileZ;
+    const scale = Math.pow(2, view.zoom - tileZ);
+    const tileSize = 256 * scale;
 
-    const startLng = Math.floor((view.centerLng - 12) / stepDeg) * stepDeg;
-    const endLng = Math.ceil((view.centerLng + 12) / stepDeg) * stepDeg;
-    for (let lng = startLng; lng <= endLng; lng += stepDeg) {
-      const [x] = project(lng, view.centerLat);
-      if (x >= 0 && x <= dimensions.width) {
-        lngLines.push({ lng: roundTo(lng, 1), x });
+    const scaleFactor = 256 * Math.pow(2, view.zoom);
+    const centerX = lngToMercatorX(view.centerLng) * scaleFactor;
+    const centerY = latToMercatorY(view.centerLat) * scaleFactor;
+
+    const worldLeft = centerX - dimensions.width / 2;
+    const worldRight = centerX + dimensions.width / 2;
+    const worldTop = centerY - dimensions.height / 2;
+    const worldBottom = centerY + dimensions.height / 2;
+
+    const minTileX = Math.floor(worldLeft / tileSize);
+    const maxTileX = Math.floor(worldRight / tileSize);
+    const minTileY = Math.max(0, Math.floor(worldTop / tileSize));
+    const maxTileY = Math.min(numTiles - 1, Math.floor(worldBottom / tileSize));
+
+    const subdomains = ['a', 'b', 'c', 'd'];
+    const tiles: Array<{
+      key: string;
+      url: string;
+      screenX: number;
+      screenY: number;
+      size: number;
+      tileZ: number;
+      wrappedX: number;
+      ty: number;
+    }> = [];
+
+    const rawClientKey = (import.meta.env.VITE_CARTO_API_KEY as string | undefined)?.trim() || '';
+    const cartoApiKey = rawClientKey.replace(/^["']|["']$/g, '');
+    const apiKeyParam = cartoApiKey
+      ? `?key=${encodeURIComponent(cartoApiKey)}&api_key=${encodeURIComponent(cartoApiKey)}`
+      : '';
+
+    for (let tx = minTileX; tx <= maxTileX; tx++) {
+      const wrappedX = ((tx % numTiles) + numTiles) % numTiles;
+      const screenX = Math.round(dimensions.width / 2 + (tx * tileSize - centerX));
+
+      for (let ty = minTileY; ty <= maxTileY; ty++) {
+        const screenY = Math.round(dimensions.height / 2 + (ty * tileSize - centerY));
+        const sub = subdomains[Math.abs(wrappedX + ty) % subdomains.length];
+
+        let url = '';
+        if (basemapStyle === 'streets') {
+          url = cartoApiKey
+            ? `https://${sub}.basemaps.cartocdn.com/rastertiles/voyager/${tileZ}/${wrappedX}/${ty}@2x.png${apiKeyParam}`
+            : `/api/tiles/streets/${tileZ}/${wrappedX}/${ty}.png`;
+        } else if (basemapStyle === 'satellite') {
+          url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${tileZ}/${ty}/${wrappedX}`;
+        } else {
+          // 'dark'
+          url = cartoApiKey
+            ? `https://${sub}.basemaps.cartocdn.com/rastertiles/dark_all/${tileZ}/${wrappedX}/${ty}@2x.png${apiKeyParam}`
+            : `/api/tiles/dark/${tileZ}/${wrappedX}/${ty}.png`;
+        }
+
+        tiles.push({
+          key: `${basemapStyle}-${tileZ}-${wrappedX}-${ty}`,
+          url,
+          screenX,
+          screenY,
+          size: Math.ceil(tileSize) + 1,
+          tileZ,
+          wrappedX,
+          ty,
+        });
       }
     }
-
-    const startLat = Math.floor((view.centerLat - 8) / stepDeg) * stepDeg;
-    const endLat = Math.ceil((view.centerLat + 8) / stepDeg) * stepDeg;
-    for (let lat = startLat; lat <= endLat; lat += stepDeg) {
-      const [, y] = project(view.centerLng, lat);
-      if (y >= 0 && y <= dimensions.height) {
-        latLines.push({ lat: roundTo(lat, 1), y });
-      }
-    }
-
-    return { lngLines, latLines };
-  }, [view, dimensions, project]);
+    return tiles;
+  }, [dimensions, view.zoom, view.centerLng, view.centerLat, basemapStyle]);
 
   const hoveredScreenPt = useMemo<[number, number] | null>(() => {
     if (hoveredDistanceKm === null || routeGeometry.coordinates.length < 2) return null;
@@ -332,6 +384,41 @@ export const MapCanvas: React.FC = () => {
           isDragging ? 'cursor-grabbing' : 'cursor-grab'
         }`}
       >
+        {/* Real-World Cartographic Basemap Tile Layer */}
+        <div
+          className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none select-none bg-[#090d16]"
+          aria-hidden="true"
+        >
+          {visibleTiles.map((tile) => (
+            <img
+              key={tile.key}
+              src={tile.url}
+              alt=""
+              loading="eager"
+              decoding="async"
+              draggable={false}
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (target.src.includes('@2x.png')) {
+                  target.src = target.src.replace('@2x.png', '.png');
+                } else if (basemapStyle === 'streets' && !target.src.includes('openstreetmap.org')) {
+                  target.src = `https://tile.openstreetmap.org/${tile.tileZ}/${tile.wrappedX}/${tile.ty}.png`;
+                } else {
+                  target.style.display = 'none';
+                }
+              }}
+              className="absolute select-none pointer-events-none"
+              style={{
+                left: `${tile.screenX}px`,
+                top: `${tile.screenY}px`,
+                width: `${tile.size}px`,
+                height: `${tile.size}px`,
+                filter: basemapStyle === 'dark' ? 'contrast(1.1) brightness(1.08)' : undefined,
+              }}
+            />
+          ))}
+        </div>
+
         {/* Vector Cartographic SVG Layer */}
         <svg
           width={dimensions.width}
@@ -339,10 +426,6 @@ export const MapCanvas: React.FC = () => {
           className="absolute inset-0 w-full h-full pointer-events-none"
         >
           <defs>
-            <radialGradient id="corridorGlow" cx="50%" cy="50%" r="60%">
-              <stop offset="0%" stopColor="#0f172a" stopOpacity="0.9" />
-              <stop offset="100%" stopColor="#020617" stopOpacity="1" />
-            </radialGradient>
             <filter id="routeGlowFilter" x="-20%" y="-20%" width="140%" height="140%">
               <feGaussianBlur stdDeviation="5" result="blur" />
               <feMerge>
@@ -351,44 +434,6 @@ export const MapCanvas: React.FC = () => {
               </feMerge>
             </filter>
           </defs>
-
-          <rect width={dimensions.width} height={dimensions.height} fill="url(#corridorGlow)" />
-
-          {/* Graticule Lat/Lng Tactical Grid */}
-          {gridLines.lngLines.map(({ lng, x }) => (
-            <g key={`lng-${lng}`}>
-              <line
-                x1={x}
-                y1={0}
-                x2={x}
-                y2={dimensions.height}
-                stroke="#0f172a"
-                strokeWidth="1"
-              />
-              <text
-                x={x + 4}
-                y={dimensions.height - 8}
-                className="fill-slate-700 text-[10px] font-mono"
-              >
-                {lng}°
-              </text>
-            </g>
-          ))}
-          {gridLines.latLines.map(({ lat, y }) => (
-            <g key={`lat-${lat}`}>
-              <line
-                x1={0}
-                y1={y}
-                x2={dimensions.width}
-                y2={y}
-                stroke="#0f172a"
-                strokeWidth="1"
-              />
-              <text x={8} y={y - 4} className="fill-slate-700 text-[10px] font-mono">
-                {lat}°N
-              </text>
-            </g>
-          ))}
 
           {/* Reachable Detour Corridor Halo */}
           {routePathD && (
@@ -753,22 +798,55 @@ export const MapCanvas: React.FC = () => {
           </button>
         </div>
 
-        {/* Bottom-Left Map Legend */}
-        <div className="absolute bottom-3 left-3 z-20 hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-lg bg-slate-950/85 border border-slate-800/90 text-[11px] font-mono text-slate-400 pointer-events-none">
-          <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" />
-            <span>Optimal Stop</span>
-          </span>
-          <span>·</span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-sky-400 inline-block" />
-            <span>Discount Brand</span>
-          </span>
-          <span>·</span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-400 inline-block" />
-            <span>Highway Plaza</span>
-          </span>
+        {/* Bottom-Left Map Controls: Basemap Style Switcher & Legend */}
+        <div className="absolute bottom-3 left-3 z-20 flex flex-wrap items-center gap-2">
+          {/* Basemap Style Toggle */}
+          <div
+            role="group"
+            aria-label="Basemap style"
+            className="flex items-center bg-slate-950/90 border border-slate-800 rounded-lg p-0.5 shadow-xl backdrop-blur-md"
+          >
+            <div className="px-1.5 text-slate-500 flex items-center">
+              <Layers className="w-3.5 h-3.5" />
+            </div>
+            {(['dark', 'streets', 'satellite'] as const).map((style) => (
+              <button
+                key={style}
+                type="button"
+                onClick={() => setBasemapStyle(style)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors capitalize cursor-pointer ${
+                  basemapStyle === style
+                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {style}
+              </button>
+            ))}
+          </div>
+
+          {/* Map Legend */}
+          <div className="hidden md:flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-slate-950/90 border border-slate-800/90 text-[11px] font-mono text-slate-400 pointer-events-none backdrop-blur-md shadow-xl">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" />
+              <span>Optimal Stop</span>
+            </span>
+            <span>·</span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-sky-400 inline-block" />
+              <span>Discount</span>
+            </span>
+            <span>·</span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-400 inline-block" />
+              <span>Highway Plaza</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Small Discreet Map Tile Attribution in Bottom Right */}
+        <div className="absolute bottom-1 right-14 z-10 pointer-events-none text-[9px] font-mono text-slate-500/80 bg-slate-950/60 px-1.5 py-0.5 rounded">
+          {basemapStyle === 'satellite' ? '© Esri, Maxar' : '© CARTO · © OpenStreetMap'}
         </div>
       </div>
     </div>

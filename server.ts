@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -150,6 +151,50 @@ async function startServer() {
       const message =
         error instanceof Error ? error.message : 'Failed to discover corridor fuel stations.';
       res.status(500).json({ error: message });
+    }
+  });
+
+  // Secure proxy endpoint for CARTO basemap tiles (keeps API key 100% hidden from client browsers)
+  app.get('/api/tiles/:style/:z/:x/:y.png', async (req, res) => {
+    try {
+      const { style, z, x, y } = req.params;
+      const rawKey = (process.env.CARTO_API_KEY || process.env.VITE_CARTO_API_KEY || '').trim();
+      const apiKey = rawKey.replace(/^["']|["']$/g, '');
+      const layer = style === 'streets' ? 'voyager' : 'dark_all';
+      const subdomains = ['a', 'b', 'c', 'd'];
+      const sub = subdomains[Math.abs(Number(x) + Number(y)) % subdomains.length];
+      
+      // CARTO's basemap endpoint strictly requires '?key=YOUR_KEY' (while legacy endpoints used '?api_key=')
+      const authQuery = apiKey
+        ? `?key=${encodeURIComponent(apiKey)}&api_key=${encodeURIComponent(apiKey)}`
+        : '';
+      const targetUrl = `https://${sub}.basemaps.cartocdn.com/rastertiles/${layer}/${z}/${x}/${y}@2x.png${authQuery}`;
+
+      const upstream = await fetch(targetUrl);
+      if (!upstream.ok) {
+        // Fallback to OpenStreetMap if streets
+        if (style === 'streets') {
+          const osmResp = await fetch(`https://tile.openstreetmap.org/${z}/${x}/${y}.png`, {
+            headers: { 'User-Agent': 'FuelOptima/1.0' },
+          });
+          if (osmResp.ok) {
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+            const osmBuf = Buffer.from(await osmResp.arrayBuffer());
+            res.send(osmBuf);
+            return;
+          }
+        }
+        res.status(upstream.status).end();
+        return;
+      }
+
+      res.setHeader('Content-Type', upstream.headers.get('content-type') || 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+      const arrayBuffer = await upstream.arrayBuffer();
+      res.send(Buffer.from(arrayBuffer));
+    } catch {
+      res.status(502).end();
     }
   });
 
