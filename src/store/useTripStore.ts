@@ -100,6 +100,7 @@ interface TripState {
   setMaxDollarPerStop: (cap: number | null) => void;
   setDetourCostWeightPerMinute: (weight: number) => void;
   setPolicy: (policy: OptimizationPolicy) => void;
+  resetSettingsToDefault: () => void;
 
   updatePricingConfig: (patch: Partial<PricingConfig>) => void;
   setZonePrice: (zone: 'start' | 'mid' | 'end', value: number) => void;
@@ -552,6 +553,24 @@ export const useTripStore = create<TripState>((set, get) => ({
       const nextState = { ...state, policy };
       return {
         policy,
+        ...recomputeStationsAndOptimization(nextState),
+      };
+    }),
+
+  resetSettingsToDefault: () =>
+    set((state) => {
+      const nextState = {
+        ...state,
+        unitSystem: 'metric' as UnitSystem,
+        policy: 'mode_b_partial_lookahead' as OptimizationPolicy,
+        maxDetourMinutes: 20,
+        maxDollarPerStop: null,
+      };
+      return {
+        unitSystem: 'metric',
+        policy: 'mode_b_partial_lookahead',
+        maxDetourMinutes: 20,
+        maxDollarPerStop: null,
         ...recomputeStationsAndOptimization(nextState),
       };
     }),

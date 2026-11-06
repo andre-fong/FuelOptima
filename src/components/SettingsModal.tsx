@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Check,
   DollarSign,
   Gauge,
   RotateCcw,
@@ -34,10 +35,12 @@ export const SettingsModal: React.FC = () => {
   const manualOverridesPerLiter = useTripStore((s) => s.manualOverridesPerLiter);
   const clearAllStationOverrides = useTripStore((s) => s.clearAllStationOverrides);
   const importCsvOverrides = useTripStore((s) => s.importCsvOverrides);
+  const resetSettingsToDefault = useTripStore((s) => s.resetSettingsToDefault);
 
   const [csvDrawerOpen, setCsvDrawerOpen] = useState(false);
   const [csvInputText, setCsvInputText] = useState('');
   const [csvImportStatus, setCsvImportStatus] = useState<string | null>(null);
+  const [justReset, setJustReset] = useState(false);
 
   // Close on Escape key
   useEffect(() => {
@@ -457,7 +460,34 @@ export const SettingsModal: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3.5 border-t border-slate-800 bg-slate-950/80 flex items-center justify-end shrink-0">
+        <div className="px-6 py-3.5 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              resetSettingsToDefault();
+              setJustReset(true);
+              setTimeout(() => setJustReset(false), 2000);
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer border ${
+              justReset
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800 border-slate-800 hover:border-slate-700'
+            }`}
+            title="Revert to Metric, Mode B, 20 min detour limit, and no per-stop max dollar cap"
+          >
+            {justReset ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Defaults restored</span>
+              </>
+            ) : (
+              <>
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset to default</span>
+              </>
+            )}
+          </button>
+
           <button
             type="button"
             onClick={() => setIsSettingsOpen(false)}
