@@ -131,6 +131,20 @@ export const LeftSidebar: React.FC = () => {
 
   const handleYearChange = (yr: number) => {
     setFilterYear(yr);
+    // Prefer preserving currently selected Make and Model if present in the new year
+    const sameMakeAndModel = vehicles.find(
+      (v) => v.year === yr && v.make === filterMake && v.model === filterModel
+    );
+    if (sameMakeAndModel) {
+      selectVehicle(sameMakeAndModel.id);
+      return;
+    }
+    const sameMake = vehicles.find((v) => v.year === yr && v.make === filterMake);
+    if (sameMake) {
+      setFilterModel(sameMake.model);
+      selectVehicle(sameMake.id);
+      return;
+    }
     const matching = vehicles.filter((v) => v.year === yr);
     if (matching.length > 0) {
       setFilterMake(matching[0].make);
@@ -141,6 +155,13 @@ export const LeftSidebar: React.FC = () => {
 
   const handleMakeChange = (mk: string) => {
     setFilterMake(mk);
+    const sameModel = vehicles.find(
+      (v) => v.year === filterYear && v.make === mk && v.model === filterModel
+    );
+    if (sameModel) {
+      selectVehicle(sameModel.id);
+      return;
+    }
     const matching = vehicles.filter((v) => v.year === filterYear && v.make === mk);
     if (matching.length > 0) {
       setFilterModel(matching[0].model);
