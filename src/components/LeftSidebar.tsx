@@ -4,6 +4,7 @@ import {
   Car,
   CheckCircle2,
   Compass,
+  Filter,
   Fuel,
   Gauge,
   MapPin,
@@ -58,10 +59,15 @@ export const LeftSidebar: React.FC = () => {
 
   const setStationPriceOverride = useTripStore((s) => s.setStationPriceOverride);
 
+  const rawStations = useTripStore((s) => s.rawStations);
   const pricedStations = useTripStore((s) => s.pricedStations);
   const optimizationResult = useTripStore((s) => s.optimizationResult);
   const selectedStationId = useTripStore((s) => s.selectedStationId);
   const setSelectedStationId = useTripStore((s) => s.setSelectedStationId);
+
+  const omittedBrands = useTripStore((s) => s.omittedBrands);
+  const toggleOmittedBrand = useTripStore((s) => s.toggleOmittedBrand);
+  const clearOmittedBrands = useTripStore((s) => s.clearOmittedBrands);
 
   // Cascading vehicle selector state derived from selectedVehicle
   const currentVehicle = useMemo(
@@ -73,6 +79,19 @@ export const LeftSidebar: React.FC = () => {
   const [filterMake, setFilterMake] = useState<string>(currentVehicle.make);
   const [filterModel, setFilterModel] = useState<string>(currentVehicle.model);
   const [stationSearch, setStationSearch] = useState<string>('');
+  const [isBrandFilterOpen, setIsBrandFilterOpen] = useState<boolean>(false);
+
+  // Compute unique brands and count of stations per brand from corridor rawStations
+  const uniqueBrands = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const st of rawStations) {
+      const b = st.brand || 'Independent';
+      counts.set(b, (counts.get(b) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([brand, count]) => ({ brand, count }))
+      .sort((a, b) => a.brand.localeCompare(b.brand));
+  }, [rawStations]);
 
   // Sync cascading dropdowns when preset changes
   React.useEffect(() => {
@@ -579,17 +598,130 @@ export const LeftSidebar: React.FC = () => {
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
                 />
               </div>
-              <button
-                type="button"
-                onClick={() => refreshLiveOverpassStations()}
-                disabled={isReconstructing}
-                title="Query live OpenStreetMap Overpass API"
-                className="px-2.5 py-1.5 bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-lg text-xs text-slate-300 flex items-center gap-1.5 cursor-pointer"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isReconstructing ? 'animate-spin' : ''}`} />
-                <span>Refresh</span>
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => refreshLiveOverpassStations()}
+                  disabled={isReconstructing}
+                  title="Query live OpenStreetMap Overpass API"
+                  aria-label="Refresh stations"
+                  className="p-2 bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-lg text-xs text-slate-300 hover:text-slate-100 flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isReconstructing ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsBrandFilterOpen(!isBrandFilterOpen)}
+                  title={isBrandFilterOpen ? 'Close brand filters' : 'Filter station brands'}
+                  aria-label="Filter station brands"
+                  className={`relative p-2 border rounded-lg text-xs flex items-center justify-center cursor-pointer transition-colors ${
+                    isBrandFilterOpen || omittedBrands.length > 0
+                      ? 'bg-emerald-500/15 border-emerald-500 text-emerald-400'
+                      : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-slate-100 hover:border-slate-700'
+                  }`}
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  {omittedBrands.length > 0 && (
+                    <span
+                      title={`${omittedBrands.length} brand(s) omitted`}
+                      className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white font-mono text-[9px] font-bold flex items-center justify-center ring-2 ring-slate-900"
+                    >
+                      {omittedBrands.length}
+                    </span>
+                  )}
+                </button>
+              </div>
             </div>
+
+            {/* Brand Checklist (Filters Tab Panel) */}
+            {isBrandFilterOpen && (
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Filter className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-xs font-semibold text-slate-200">
+                      Brand Checklist ({uniqueBrands.length} brands found)
+                    </span>
+                  </div>
+                  {omittedBrands.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearOmittedBrands}
+                      className="text-[11px] text-emerald-400 hover:underline cursor-pointer font-medium"
+                    >
+                      Reset (Include All)
+                    </button>
+                  )}
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Check any brand to <span className="text-rose-400 font-medium">omit</span> it. FuelOptima will recalculate another optimal route avoiding that brand.
+                </p>
+
+                <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto pr-1">
+                  {uniqueBrands.map(({ brand, count }) => {
+                    const isChecked = omittedBrands.includes(brand);
+                    return (
+                      <label
+                        key={brand}
+                        className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                          isChecked
+                            ? 'bg-rose-950/30 border-rose-500/60 text-rose-300'
+                            : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleOmittedBrand(brand)}
+                            className="accent-rose-500 rounded cursor-pointer shrink-0"
+                          />
+                          <span
+                            className={`truncate font-medium ${
+                              isChecked ? 'line-through text-rose-400' : 'text-slate-200'
+                            }`}
+                            title={brand}
+                          >
+                            {brand}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono px-1 rounded bg-slate-950/80 text-slate-400 shrink-0">
+                          {count}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {omittedBrands.length > 0 && (
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] font-mono">
+                    <span className="text-rose-400">
+                      {omittedBrands.length} brand{omittedBrands.length > 1 ? 's' : ''} omitted
+                    </span>
+                    <span className="text-emerald-400">
+                      {pricedStations.length} station{pricedStations.length === 1 ? '' : 's'} available
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Active Filters Summary Pill when Drawer is Collapsed */}
+            {!isBrandFilterOpen && omittedBrands.length > 0 && (
+              <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-rose-950/20 border border-rose-500/30 text-[11px]">
+                <span className="text-rose-300 truncate">
+                  Omitted {omittedBrands.length} brand{omittedBrands.length > 1 ? 's' : ''}: {omittedBrands.join(', ')}
+                </span>
+                <button
+                  type="button"
+                  onClick={clearOmittedBrands}
+                  className="text-emerald-400 hover:underline cursor-pointer font-medium ml-2 shrink-0"
+                >
+                  Reset
+                </button>
+              </div>
+            )}
 
             <div className="space-y-2">
               {filteredStations.map((st) => {

@@ -66,6 +66,7 @@ interface TripState {
   // Hybrid Pricing State
   pricingConfig: PricingConfig;
   manualOverridesPerLiter: Record<string, number>;
+  omittedBrands: string[];
 
   // Derived / Computed State
   pricedStations: FuelStation[];
@@ -78,6 +79,10 @@ interface TripState {
   setHoveredDistanceKm: (km: number | null) => void;
   setIsTelemetryExpanded: (expanded: boolean) => void;
   setIsSettingsOpen: (open: boolean) => void;
+
+  toggleOmittedBrand: (brand: string) => void;
+  setOmittedBrands: (brands: string[]) => void;
+  clearOmittedBrands: () => void;
 
   setGoogleMapsUrlInput: (url: string) => void;
   loadDemoTrip: (demoId: string) => void;
@@ -135,13 +140,20 @@ function recomputeStationsAndOptimization(state: {
   maxDollarPerStop: number | null;
   detourCostWeightPerMinute: number;
   policy: OptimizationPolicy;
+  omittedBrands?: string[];
 }): { pricedStations: FuelStation[]; optimizationResult: OptimizationResult } {
-  const pricedStations = computeStationPrices(
+  const allPriced = computeStationPrices(
     state.rawStations,
     state.pricingConfig,
     state.unitSystem,
     state.manualOverridesPerLiter
   );
+
+  const omitted = state.omittedBrands ?? [];
+  const pricedStations =
+    omitted.length > 0
+      ? allPriced.filter((s) => !omitted.includes(s.brand))
+      : allPriced;
 
   const optimizationResult = optimizeRefuelingSchedule({
     totalDistanceKm: state.routeGeometry.distanceKm,
@@ -212,6 +224,7 @@ export const useTripStore = create<TripState>((set, get) => ({
 
   pricingConfig: initialPricingConfig,
   manualOverridesPerLiter: {},
+  omittedBrands: [],
 
   pricedStations: initialComputed.pricedStations,
   optimizationResult: initialComputed.optimizationResult,
@@ -262,6 +275,7 @@ export const useTripStore = create<TripState>((set, get) => ({
       fuelEconomyL100km: vehicle.highwayL100km,
       pricingConfig: nextPricing,
       manualOverridesPerLiter: {},
+      omittedBrands: [],
       selectedStationId: null,
       reconstructError: null,
       reconstructStatus: null,
@@ -365,6 +379,7 @@ export const useTripStore = create<TripState>((set, get) => ({
         pricingConfig: nextPricingConfig,
         targetArrivalReservePercent: nextTargetArrivalPct,
         manualOverridesPerLiter: {},
+        omittedBrands: [],
       });
 
       set({
@@ -379,6 +394,7 @@ export const useTripStore = create<TripState>((set, get) => ({
         pricingConfig: nextPricingConfig,
         targetArrivalReservePercent: nextTargetArrivalPct,
         manualOverridesPerLiter: {},
+        omittedBrands: [],
         selectedStationId: null,
         ...nextComputed,
       });
@@ -640,6 +656,56 @@ export const useTripStore = create<TripState>((set, get) => ({
     }
     return matchedCount;
   },
+
+  toggleOmittedBrand: (brand) =>
+    set((state) => {
+      const isOmitted = state.omittedBrands.includes(brand);
+      const nextOmitted = isOmitted
+        ? state.omittedBrands.filter((b) => b !== brand)
+        : [...state.omittedBrands, brand];
+
+      const nextComputed = recomputeStationsAndOptimization({
+        ...state,
+        omittedBrands: nextOmitted,
+      });
+
+      const nextSelectedStationId =
+        state.selectedStationId &&
+        nextComputed.pricedStations.some((s) => s.id === state.selectedStationId)
+          ? state.selectedStationId
+          : null;
+
+      return {
+        omittedBrands: nextOmitted,
+        selectedStationId: nextSelectedStationId,
+        ...nextComputed,
+      };
+    }),
+
+  setOmittedBrands: (omittedBrands) =>
+    set((state) => {
+      const nextComputed = recomputeStationsAndOptimization({
+        ...state,
+        omittedBrands,
+      });
+      return {
+        omittedBrands,
+        ...nextComputed,
+      };
+    }),
+
+  clearOmittedBrands: () =>
+    set((state) => {
+      if (state.omittedBrands.length === 0) return {};
+      const nextComputed = recomputeStationsAndOptimization({
+        ...state,
+        omittedBrands: [],
+      });
+      return {
+        omittedBrands: [],
+        ...nextComputed,
+      };
+    }),
 }));
 
 // Helper selectors for formatted values in active unit system
