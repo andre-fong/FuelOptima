@@ -38,6 +38,7 @@ interface TripState {
   selectedStationId: string | null;
   hoveredDistanceKm: number | null;
   isTelemetryExpanded: boolean;
+  isSettingsOpen: boolean;
 
   // Route & URL State
   activeDemoId: string | null;
@@ -76,6 +77,7 @@ interface TripState {
   setSelectedStationId: (id: string | null) => void;
   setHoveredDistanceKm: (km: number | null) => void;
   setIsTelemetryExpanded: (expanded: boolean) => void;
+  setIsSettingsOpen: (open: boolean) => void;
 
   setGoogleMapsUrlInput: (url: string) => void;
   loadDemoTrip: (demoId: string) => void;
@@ -186,6 +188,7 @@ export const useTripStore = create<TripState>((set, get) => ({
   selectedStationId: null,
   hoveredDistanceKm: null,
   isTelemetryExpanded: true,
+  isSettingsOpen: false,
 
   activeDemoId: initialDemo.id,
   googleMapsUrlInput: initialDemo.googleMapsUrl,
@@ -231,6 +234,7 @@ export const useTripStore = create<TripState>((set, get) => ({
   setSelectedStationId: (selectedStationId) => set({ selectedStationId }),
   setHoveredDistanceKm: (hoveredDistanceKm) => set({ hoveredDistanceKm }),
   setIsTelemetryExpanded: (isTelemetryExpanded) => set({ isTelemetryExpanded }),
+  setIsSettingsOpen: (isSettingsOpen) => set({ isSettingsOpen }),
 
   setGoogleMapsUrlInput: (googleMapsUrlInput) => set({ googleMapsUrlInput }),
 

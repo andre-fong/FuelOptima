@@ -8,6 +8,7 @@ import { TopBar } from './components/TopBar';
 import { LeftSidebar } from './components/LeftSidebar';
 import { MapCanvas } from './components/MapCanvas';
 import { TelemetryChart } from './components/TelemetryChart';
+import { SettingsModal } from './components/SettingsModal';
 
 export default function App() {
   const [mobileView, setMobileView] = useState<'controls' | 'map'>('controls');
@@ -16,6 +17,9 @@ export default function App() {
     <div id="top" className="h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden">
       {/* Top Bar following 3-zone contract */}
       <TopBar />
+
+      {/* Global Settings Modal */}
+      <SettingsModal />
 
       {/* Mobile Viewport Switcher (visible only below lg breakpoint) */}
       <div className="flex lg:hidden items-center bg-slate-900 border-b border-slate-800 px-4 py-1.5 gap-2 shrink-0">
