@@ -47,8 +47,10 @@ export const LeftSidebar: React.FC = () => {
   const selectVehicle = useTripStore((s) => s.selectVehicle);
   const tankCapacityLiters = useTripStore((s) => s.tankCapacityLiters);
   const fuelEconomyL100km = useTripStore((s) => s.fuelEconomyL100km);
+  const cityFuelEconomyL100km = useTripStore((s) => s.cityFuelEconomyL100km);
   const setCustomTankCapacity = useTripStore((s) => s.setCustomTankCapacity);
   const setCustomFuelEconomy = useTripStore((s) => s.setCustomFuelEconomy);
+  const setCustomCityFuelEconomy = useTripStore((s) => s.setCustomCityFuelEconomy);
 
   const initialFuelPercent = useTripStore((s) => s.initialFuelPercent);
   const setInitialFuelPercent = useTripStore((s) => s.setInitialFuelPercent);
@@ -186,6 +188,7 @@ export const LeftSidebar: React.FC = () => {
   const priceUnit = unitSystem === 'metric' ? '$/L' : '$/gal';
 
   const displayEfficiency = getFormattedEfficiency(fuelEconomyL100km, unitSystem);
+  const displayCityEfficiency = getFormattedEfficiency(cityFuelEconomyL100km, unitSystem);
   const displayTankCap = getFormattedTankCapacity(tankCapacityLiters, unitSystem);
   const maxFullRangeKm = computeDistanceFromFuelKm(
     tankCapacityLiters * (1 - minStopReservePercent / 100),
@@ -471,8 +474,8 @@ export const LeftSidebar: React.FC = () => {
                 </select>
               </div>
 
-              {/* Editable Highway Efficiency & Tank Capacity Overrides */}
-              <div className="grid grid-cols-2 gap-3 pt-1">
+              {/* Editable Highway/City Efficiency & Tank Capacity Overrides */}
+              <div className="grid grid-cols-2 gap-2.5 pt-1">
                 <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
                   <label
                     htmlFor="hwy-efficiency-input"
@@ -502,6 +505,34 @@ export const LeftSidebar: React.FC = () => {
                 </div>
 
                 <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
+                  <label
+                    htmlFor="city-efficiency-input"
+                    className="block text-[11px] text-slate-400"
+                  >
+                    City Efficiency ({effUnit})
+                  </label>
+                  <div className="flex items-center justify-between mt-1">
+                    <input
+                      id="city-efficiency-input"
+                      type="number"
+                      step="0.5"
+                      min="2"
+                      max="120"
+                      value={displayCityEfficiency}
+                      onChange={(e) =>
+                        setCustomCityFuelEconomy(parseFloat(e.target.value) || 10, unitSystem)
+                      }
+                      className="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm font-mono font-semibold text-emerald-400 tabular-nums focus:outline-none focus:border-emerald-500"
+                    />
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      {unitSystem === 'metric'
+                        ? `${roundTo(l100kmToMpg(cityFuelEconomyL100km), 0)} MPG`
+                        : `${roundTo(cityFuelEconomyL100km, 1)} L/100`}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="col-span-2 p-2.5 rounded-lg bg-slate-950 border border-slate-800">
                   <label htmlFor="tank-cap-input" className="block text-[11px] text-slate-400">
                     Tank Capacity ({volUnit})
                   </label>
@@ -516,10 +547,10 @@ export const LeftSidebar: React.FC = () => {
                       onChange={(e) =>
                         setCustomTankCapacity(parseFloat(e.target.value) || 50, unitSystem)
                       }
-                      className="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm font-mono font-semibold text-slate-100 tabular-nums focus:outline-none focus:border-emerald-500"
+                      className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm font-mono font-semibold text-slate-100 tabular-nums focus:outline-none focus:border-emerald-500"
                     />
                     <span className="text-[11px] text-slate-500 font-mono">
-                      Max {displayMaxRange} {distUnit}
+                      Max range: <span className="text-emerald-400 font-semibold">{displayMaxRange} {distUnit}</span>
                     </span>
                   </div>
                 </div>
@@ -867,83 +898,174 @@ export const LeftSidebar: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <div className="text-xs font-mono text-slate-300 tabular-nums">
-                  {unitSystem === 'metric'
-                    ? `${optimizationResult.departureFuelLiters} L`
-                    : `${optimizationResult.departureFuelGal} gal`}
+                <div className="text-right font-mono">
+                  <div className="text-xs font-semibold text-emerald-400 tabular-nums">
+                    {initialFuelPercent}%
+                  </div>
+                  <div className="text-[11px] text-slate-400 tabular-nums">
+                    {unitSystem === 'metric'
+                      ? `${optimizationResult.departureFuelLiters} L`
+                      : `${optimizationResult.departureFuelGal} gal`}
+                  </div>
                 </div>
               </div>
 
               {/* Optimal Refuel Stops */}
               {optimizationResult.stops.length === 0 && optimizationResult.feasible && (
-                <div className="p-4 rounded-lg bg-emerald-950/20 border border-emerald-500/40 text-xs text-emerald-300 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>
-                    Zero refueling stops needed! Starting fuel is sufficient to reach Destination
-                    above your {targetArrivalReservePercent}% reserve threshold.
-                  </span>
-                </div>
+                <>
+                  <div className="p-4 rounded-lg bg-emerald-950/20 border border-emerald-500/40 text-xs text-emerald-300 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>
+                      Zero refueling stops needed! Starting fuel is sufficient to reach Destination
+                      above your {targetArrivalReservePercent}% reserve threshold.
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-start my-1.5">
+                    <div className="inline-flex items-center flex-wrap gap-2.5 px-3.5 py-1.5 rounded-full bg-slate-950/90 border border-slate-800 text-xs font-mono text-slate-300 shadow-sm">
+                      <span className="text-slate-200 font-semibold">
+                        {unitSystem === 'metric' ? routeGeometry.distanceKm : routeGeometry.distanceMiles} {distUnit} drive
+                      </span>
+                      <span className="text-slate-600">·</span>
+                      <span className="text-sky-400">
+                        🛣️ {unitSystem === 'metric'
+                          ? (optimizationResult.totalHighwayKm ?? 0)
+                          : roundTo(kmToMiles(optimizationResult.totalHighwayKm ?? 0), 1)} {distUnit} Hwy
+                      </span>
+                      <span className="text-slate-600">·</span>
+                      <span className="text-amber-400">
+                        🏙️ {unitSystem === 'metric'
+                          ? (optimizationResult.totalCityKm ?? 0)
+                          : roundTo(kmToMiles(optimizationResult.totalCityKm ?? 0), 1)} {distUnit} City
+                      </span>
+                    </div>
+                  </div>
+                </>
               )}
 
-              {optimizationResult.stops.map((stop) => (
-                <div
-                  key={stop.station.id}
-                  onClick={() => setSelectedStationId(stop.station.id)}
-                  className="p-3.5 rounded-lg bg-slate-950 border border-emerald-500/50 hover:border-emerald-400 transition-colors space-y-2.5 cursor-pointer"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="text-xs font-bold text-emerald-400 font-mono">
-                        STOP #{stop.stopNumber} ·{' '}
-                        {unitSystem === 'metric'
-                          ? `${stop.station.distanceAlongRouteKm} km`
-                          : `${stop.station.distanceAlongRouteMiles} mi`}
-                      </div>
-                      <div className="text-sm font-semibold text-slate-100 mt-0.5">
-                        {stop.station.name}
-                      </div>
-                    </div>
-                    <div className="text-right font-mono">
-                      <div className="text-sm font-bold text-emerald-400 tabular-nums">
-                        ${stop.stepCost.toFixed(2)}
-                      </div>
-                      <div className="text-[11px] text-slate-400 tabular-nums">
-                        {unitSystem === 'metric'
-                          ? `$${stop.pricePerLiter.toFixed(3)}/L`
-                          : `$${stop.pricePerGal.toFixed(2)}/gal`}
-                      </div>
-                    </div>
-                  </div>
+              {optimizationResult.stops.map((stop) => {
+                const legDist =
+                  unitSystem === 'metric' ? stop.legDistanceFromPrevKm : stop.legDistanceFromPrevMiles;
+                const hwyDist =
+                  unitSystem === 'metric' ? stop.legHighwayKm : stop.legHighwayMiles;
+                const cityDist =
+                  unitSystem === 'metric' ? stop.legCityKm : stop.legCityMiles;
 
-                  <div className="grid grid-cols-3 gap-2 p-2 rounded bg-slate-900/90 font-mono text-center">
-                    <div>
-                      <div className="text-[10px] text-slate-400">Arrive Tank</div>
-                      <div className="text-xs font-semibold text-amber-400 tabular-nums">
-                        {stop.arrivalFuelPercent}%
+                return (
+                  <React.Fragment key={stop.station.id}>
+                    <div className="flex items-center justify-start my-1.5">
+                      <div className="inline-flex items-center flex-wrap gap-2.5 px-3.5 py-1.5 rounded-full bg-slate-950/90 border border-slate-800 text-xs font-mono text-slate-300 shadow-sm">
+                        <span className="text-slate-200 font-semibold">
+                          {legDist} {distUnit} drive
+                        </span>
+                        <span className="text-slate-600">·</span>
+                        <span className="text-sky-400">
+                          🛣️ {hwyDist} {distUnit} Hwy
+                        </span>
+                        <span className="text-slate-600">·</span>
+                        <span className="text-amber-400">
+                          🏙️ {cityDist} {distUnit} City
+                        </span>
                       </div>
                     </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400">Pump Volume</div>
-                      <div className="text-xs font-semibold text-emerald-400 tabular-nums">
-                        +
-                        {unitSystem === 'metric'
-                          ? `${stop.fuelPurchasedLiters} L`
-                          : `${stop.fuelPurchasedGal} gal`}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400">Depart Tank</div>
-                      <div className="text-xs font-semibold text-slate-100 tabular-nums">
-                        {stop.departureFuelPercent}%
-                      </div>
-                    </div>
-                  </div>
 
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    {stop.policyExplanation}
-                  </p>
+                    <div
+                      onClick={() => setSelectedStationId(stop.station.id)}
+                      className="p-3.5 rounded-lg bg-slate-950 border border-emerald-500/50 hover:border-emerald-400 transition-colors space-y-2.5 cursor-pointer"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-bold text-emerald-400 font-mono">
+                            STOP #{stop.stopNumber} ·{' '}
+                            {unitSystem === 'metric'
+                              ? `${stop.station.distanceAlongRouteKm} km`
+                              : `${stop.station.distanceAlongRouteMiles} mi`} mark
+                          </div>
+                          <div className="text-sm font-semibold text-slate-100 mt-0.5">
+                            {stop.station.name}
+                          </div>
+                        </div>
+                        <div className="text-right font-mono">
+                          <div className="text-sm font-bold text-emerald-400 tabular-nums">
+                            ${stop.stepCost.toFixed(2)}
+                          </div>
+                          <div className="text-[11px] text-slate-400 tabular-nums">
+                            {unitSystem === 'metric'
+                              ? `$${stop.pricePerLiter.toFixed(3)}/L`
+                              : `$${stop.pricePerGal.toFixed(2)}/gal`}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 p-2 rounded bg-slate-900/90 font-mono text-center">
+                        <div>
+                          <div className="text-[10px] text-slate-400">Arrive Tank</div>
+                          <div className="text-xs font-semibold text-amber-400 tabular-nums">
+                            {stop.arrivalFuelPercent}%
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-slate-400">Pump Volume</div>
+                          <div className="text-xs font-semibold text-emerald-400 tabular-nums">
+                            +
+                            {unitSystem === 'metric'
+                              ? `${stop.fuelPurchasedLiters} L`
+                              : `${stop.fuelPurchasedGal} gal`}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-slate-400">Depart Tank</div>
+                          <div className="text-xs font-semibold text-slate-100 tabular-nums">
+                            {stop.departureFuelPercent}%
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        {stop.policyExplanation}
+                      </p>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+
+              {/* Final Leg to Destination (if stops exist) */}
+              {optimizationResult.feasible && optimizationResult.stops.length > 0 && (
+                <div className="flex items-center justify-start my-1.5">
+                  <div className="inline-flex items-center flex-wrap gap-2.5 px-3.5 py-1.5 rounded-full bg-slate-950/90 border border-slate-800 text-xs font-mono text-slate-300 shadow-sm">
+                    <span className="text-slate-200 font-semibold">
+                      {unitSystem === 'metric'
+                        ? roundTo(
+                            routeGeometry.distanceKm -
+                              optimizationResult.stops[optimizationResult.stops.length - 1].station
+                                .distanceAlongRouteKm,
+                            1
+                          )
+                        : roundTo(
+                            routeGeometry.distanceMiles -
+                              optimizationResult.stops[optimizationResult.stops.length - 1].station
+                                .distanceAlongRouteMiles,
+                            1
+                          )}{' '}
+                      {distUnit} drive
+                    </span>
+                    <span className="text-slate-600">·</span>
+                    <span className="text-sky-400">
+                      🛣️ {unitSystem === 'metric'
+                        ? (optimizationResult.finalLegHighwayKm ?? 0)
+                        : (optimizationResult.finalLegHighwayMiles ?? 0)}{' '}
+                      {distUnit} Hwy
+                    </span>
+                    <span className="text-slate-600">·</span>
+                    <span className="text-amber-400">
+                      🏙️ {unitSystem === 'metric'
+                        ? (optimizationResult.finalLegCityKm ?? 0)
+                        : (optimizationResult.finalLegCityMiles ?? 0)}{' '}
+                      {distUnit} City
+                    </span>
+                  </div>
                 </div>
-              ))}
+              )}
 
               {/* Destination Node */}
               {optimizationResult.feasible && (

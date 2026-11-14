@@ -28,6 +28,17 @@ import type {
 
 export type SidebarTab = 'route' | 'pricing' | 'stations' | 'ledger';
 
+const ONBOARDING_STORAGE_KEY = 'fueloptima_onboarding_seen';
+
+function getInitialOnboardingOpen(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(ONBOARDING_STORAGE_KEY) !== 'true';
+  } catch {
+    return false;
+  }
+}
+
 interface TripState {
   // UI State
   activeTab: SidebarTab;
@@ -39,6 +50,7 @@ interface TripState {
   hoveredDistanceKm: number | null;
   isTelemetryExpanded: boolean;
   isSettingsOpen: boolean;
+  isOnboardingOpen: boolean;
 
   // Route & URL State
   activeDemoId: string | null;
@@ -53,6 +65,7 @@ interface TripState {
   isCustomVehicle: boolean;
   tankCapacityLiters: number;
   fuelEconomyL100km: number;
+  cityFuelEconomyL100km: number;
   initialFuelPercent: number;
   minStopReservePercent: number;
   targetArrivalReservePercent: number;
@@ -79,6 +92,7 @@ interface TripState {
   setHoveredDistanceKm: (km: number | null) => void;
   setIsTelemetryExpanded: (expanded: boolean) => void;
   setIsSettingsOpen: (open: boolean) => void;
+  setIsOnboardingOpen: (open: boolean) => void;
 
   toggleOmittedBrand: (brand: string) => void;
   setOmittedBrands: (brands: string[]) => void;
@@ -92,6 +106,7 @@ interface TripState {
   selectVehicle: (vehicleId: string) => void;
   setCustomTankCapacity: (value: number, unit: UnitSystem) => void;
   setCustomFuelEconomy: (value: number, unit: UnitSystem) => void;
+  setCustomCityFuelEconomy: (value: number, unit: UnitSystem) => void;
   setInitialFuelPercent: (pct: number) => void;
   setMinStopReservePercent: (pct: number) => void;
   setTargetArrivalReservePercent: (pct: number) => void;
@@ -134,6 +149,7 @@ function recomputeStationsAndOptimization(state: {
   routeGeometry: RouteGeometry;
   tankCapacityLiters: number;
   fuelEconomyL100km: number;
+  cityFuelEconomyL100km?: number;
   initialFuelPercent: number;
   minStopReservePercent: number;
   targetArrivalReservePercent: number;
@@ -161,6 +177,7 @@ function recomputeStationsAndOptimization(state: {
     routeCoordinates: state.routeGeometry.coordinates,
     tankCapacityLiters: state.tankCapacityLiters,
     fuelEconomyL100km: state.fuelEconomyL100km,
+    cityFuelEconomyL100km: state.cityFuelEconomyL100km,
     initialFuelPercent: state.initialFuelPercent,
     minStopReservePercent: state.minStopReservePercent,
     targetArrivalReservePercent: state.targetArrivalReservePercent,
@@ -183,6 +200,7 @@ const initialComputed = recomputeStationsAndOptimization({
   routeGeometry: initialDemo.routeGeometry,
   tankCapacityLiters: initialVehicle.tankCapacityLiters,
   fuelEconomyL100km: initialVehicle.highwayL100km,
+  cityFuelEconomyL100km: initialVehicle.cityL100km,
   initialFuelPercent: 35, // Start at 35% so multi-stop optimization is showcased immediately
   minStopReservePercent: 10,
   targetArrivalReservePercent: 25,
@@ -202,6 +220,7 @@ export const useTripStore = create<TripState>((set, get) => ({
   hoveredDistanceKm: null,
   isTelemetryExpanded: true,
   isSettingsOpen: false,
+  isOnboardingOpen: getInitialOnboardingOpen(),
 
   activeDemoId: initialDemo.id,
   googleMapsUrlInput: initialDemo.googleMapsUrl,
@@ -214,6 +233,7 @@ export const useTripStore = create<TripState>((set, get) => ({
   isCustomVehicle: false,
   tankCapacityLiters: initialVehicle.tankCapacityLiters,
   fuelEconomyL100km: initialVehicle.highwayL100km,
+  cityFuelEconomyL100km: initialVehicle.cityL100km,
   initialFuelPercent: 35,
   minStopReservePercent: 10,
   targetArrivalReservePercent: 25,
@@ -249,6 +269,16 @@ export const useTripStore = create<TripState>((set, get) => ({
   setHoveredDistanceKm: (hoveredDistanceKm) => set({ hoveredDistanceKm }),
   setIsTelemetryExpanded: (isTelemetryExpanded) => set({ isTelemetryExpanded }),
   setIsSettingsOpen: (isSettingsOpen) => set({ isSettingsOpen }),
+  setIsOnboardingOpen: (isOnboardingOpen) => {
+    if (!isOnboardingOpen) {
+      try {
+        window.localStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
+      } catch {
+        // ignore storage errors
+      }
+    }
+    set({ isOnboardingOpen });
+  },
 
   setGoogleMapsUrlInput: (googleMapsUrlInput) => set({ googleMapsUrlInput }),
 
@@ -274,6 +304,7 @@ export const useTripStore = create<TripState>((set, get) => ({
       isCustomVehicle: false,
       tankCapacityLiters: vehicle.tankCapacityLiters,
       fuelEconomyL100km: vehicle.highwayL100km,
+      cityFuelEconomyL100km: vehicle.cityL100km,
       pricingConfig: nextPricing,
       manualOverridesPerLiter: {},
       omittedBrands: [],
@@ -453,12 +484,14 @@ export const useTripStore = create<TripState>((set, get) => ({
         isCustomVehicle: false,
         tankCapacityLiters: spec.tankCapacityLiters,
         fuelEconomyL100km: spec.highwayL100km,
+        cityFuelEconomyL100km: spec.cityL100km,
       };
       return {
         selectedVehicleId: spec.id,
         isCustomVehicle: false,
         tankCapacityLiters: spec.tankCapacityLiters,
         fuelEconomyL100km: spec.highwayL100km,
+        cityFuelEconomyL100km: spec.cityL100km,
         ...recomputeStationsAndOptimization(nextState),
       };
     }),
@@ -490,6 +523,22 @@ export const useTripStore = create<TripState>((set, get) => ({
       return {
         isCustomVehicle: true,
         fuelEconomyL100km: nextState.fuelEconomyL100km,
+        ...recomputeStationsAndOptimization(nextState),
+      };
+    }),
+
+  setCustomCityFuelEconomy: (value, unit) =>
+    set((state) => {
+      const l100km = unit === 'metric' ? value : mpgToL100km(value);
+      const clamped = Math.max(2.5, Math.min(30, l100km));
+      const nextState = {
+        ...state,
+        isCustomVehicle: true,
+        cityFuelEconomyL100km: roundTo(clamped, 2),
+      };
+      return {
+        isCustomVehicle: true,
+        cityFuelEconomyL100km: nextState.cityFuelEconomyL100km,
         ...recomputeStationsAndOptimization(nextState),
       };
     }),

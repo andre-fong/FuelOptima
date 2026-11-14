@@ -72,6 +72,60 @@ function computeFuelCost(
   return litersToGallons(liters) * station.effectivePricePerGal;
 }
 
+export interface SegmentBurnResult {
+  totalFuelLiters: number;
+  highwayKm: number;
+  cityKm: number;
+}
+
+/**
+ * Computes exact integrated fuel consumption using dual Highway & City efficiency ratings (Approach B).
+ * Classifies route segments:
+ * - Urban endpoints (origin / destination city limits, speeds < 80 km/h) = City efficiency
+ * - Off-highway station detours (ramps, traffic signals, plaza access) = City efficiency
+ * - Main freeway corridor cruise (speeds >= 80 km/h) = Highway efficiency
+ */
+export function computeSegmentFuelBurn(
+  startRouteKm: number,
+  endRouteKm: number,
+  totalRouteKm: number,
+  hwyL100km: number,
+  cityL100km: number,
+  detourKm: number = 0,
+  urbanBoundaryKm: number = 8.0
+): SegmentBurnResult {
+  const segDist = Math.max(0, endRouteKm - startRouteKm);
+  if (segDist <= 0 && detourKm <= 0) {
+    return { totalFuelLiters: 0, highwayKm: 0, cityKm: 0 };
+  }
+
+  // Calculate overlap with origin urban zone [0, urbanBoundaryKm]
+  const originCityStart = Math.max(startRouteKm, 0);
+  const originCityEnd = Math.min(endRouteKm, Math.min(urbanBoundaryKm, totalRouteKm / 4));
+  const originCityKm = Math.max(0, originCityEnd - originCityStart);
+
+  // Calculate overlap with destination urban zone [totalRouteKm - urbanBoundaryKm, totalRouteKm]
+  const destCityThreshold = Math.max(0, totalRouteKm - Math.min(urbanBoundaryKm, totalRouteKm / 4));
+  const destCityStart = Math.max(startRouteKm, destCityThreshold);
+  const destCityEnd = Math.min(endRouteKm, totalRouteKm);
+  const destCityKm = Math.max(0, destCityEnd - destCityStart);
+
+  const routeCityKm = originCityKm + destCityKm;
+  const highwayKm = Math.max(0, segDist - routeCityKm);
+  const totalCityKm = routeCityKm + detourKm; // station detours are 100% city driving
+
+  const effectiveHwy = Math.max(0.5, hwyL100km);
+  const effectiveCity = Math.max(0.5, cityL100km || hwyL100km);
+
+  const fuelLiters = (highwayKm / 100) * effectiveHwy + (totalCityKm / 100) * effectiveCity;
+
+  return {
+    totalFuelLiters: fuelLiters,
+    highwayKm: roundTo(highwayKm, 1),
+    cityKm: roundTo(totalCityKm, 1),
+  };
+}
+
 /**
  * Computes maximum liters that can be purchased at `station` given `maxDollarPerStop`.
  */
@@ -132,8 +186,18 @@ export function optimizeRefuelingSchedule(input: OptimizationInput): Optimizatio
   const maxRangeFromFullKm = computeDistanceFromFuelKm(Math.max(0, C - fMinStop), R100);
   const maxRangeFromStartKm = computeDistanceFromFuelKm(Math.max(0, fStart - fMinStop), R100);
 
+  const cityR100 = input.cityFuelEconomyL100km ?? R100;
+
   // Quick check: Can the vehicle reach Destination B with zero stops?
-  const totalTripFuelNeeded = computeFuelBurnedLiters(totalDistanceKm, R100);
+  const zeroStopBurn = computeSegmentFuelBurn(
+    0,
+    totalDistanceKm,
+    totalDistanceKm,
+    R100,
+    cityR100,
+    0
+  );
+  const totalTripFuelNeeded = zeroStopBurn.totalFuelLiters;
   if (fStart - totalTripFuelNeeded >= fTargetEnd - 1e-6) {
     const arrivalFuelLiters = fStart - totalTripFuelNeeded;
     const telemetry = buildTelemetryProfile(
@@ -141,6 +205,7 @@ export function optimizeRefuelingSchedule(input: OptimizationInput): Optimizatio
       routeCoordinates,
       C,
       R100,
+      cityR100,
       fStart,
       fMinStop,
       [],
@@ -164,6 +229,12 @@ export function optimizeRefuelingSchedule(input: OptimizationInput): Optimizatio
       arrivalFuelLiters: roundTo(arrivalFuelLiters, 2),
       arrivalFuelGal: roundTo(litersToGallons(arrivalFuelLiters), 2),
       arrivalFuelPercent: roundTo((arrivalFuelLiters / C) * 100, 1),
+      finalLegHighwayKm: zeroStopBurn.highwayKm,
+      finalLegCityKm: zeroStopBurn.cityKm,
+      finalLegHighwayMiles: roundTo(kmToMiles(zeroStopBurn.highwayKm), 1),
+      finalLegCityMiles: roundTo(kmToMiles(zeroStopBurn.cityKm), 1),
+      totalHighwayKm: zeroStopBurn.highwayKm,
+      totalCityKm: zeroStopBurn.cityKm,
       telemetry,
       executionTimeMs: roundTo(performance.now() - startTime, 2),
     };
@@ -296,6 +367,7 @@ export function optimizeRefuelingSchedule(input: OptimizationInput): Optimizatio
       totalDistanceKm,
       C,
       R100,
+      cityR100,
       fStart,
       fMinStop,
       fTargetEnd,
@@ -309,6 +381,7 @@ export function optimizeRefuelingSchedule(input: OptimizationInput): Optimizatio
       totalDistanceKm,
       C,
       R100,
+      cityR100,
       fStart,
       fMinStop,
       fTargetEnd,
@@ -345,6 +418,26 @@ export function optimizeRefuelingSchedule(input: OptimizationInput): Optimizatio
     );
   }
 
+  // Calculate final leg from last stop to destination
+  const lastStopDist = stops.length > 0 ? stops[stops.length - 1].station.distanceAlongRouteKm : 0;
+  const finalLegBurn = computeSegmentFuelBurn(
+    lastStopDist,
+    totalDistanceKm,
+    totalDistanceKm,
+    R100,
+    cityR100,
+    0
+  );
+
+  const totalHighwayKm = roundTo(
+    stops.reduce((acc, s) => acc + s.legHighwayKm, 0) + finalLegBurn.highwayKm,
+    1
+  );
+  const totalCityKm = roundTo(
+    stops.reduce((acc, s) => acc + s.legCityKm, 0) + finalLegBurn.cityKm,
+    1
+  );
+
   // Compute totals and naive baseline comparison
   const totalCost = roundTo(stops.reduce((acc, s) => acc + s.stepCost, 0), 2);
   const totalFuelPurchasedLiters = roundTo(
@@ -353,8 +446,19 @@ export function optimizeRefuelingSchedule(input: OptimizationInput): Optimizatio
   );
   const totalFuelPurchasedGal = roundTo(litersToGallons(totalFuelPurchasedLiters), 2);
   const totalDetourMinutes = roundTo(stops.reduce((acc, s) => acc + s.detourMinutes, 0), 1);
-  const totalDetourBurnLiters = stops.reduce((acc, s) => acc + s.detourFuelBurnedLiters, 0);
-  const totalFuelBurnedLiters = roundTo(totalTripFuelNeeded + totalDetourBurnLiters, 2);
+  const totalDetourBurnLiters = roundTo(
+    stops.reduce((acc, s) => acc + s.detourFuelBurnedLiters, 0),
+    2
+  );
+
+  const totalLegsBurnLiters = stops.reduce((acc, s) => {
+    const segCityWithoutDetour = Math.max(0, s.legCityKm - s.station.detourDistanceKm);
+    return acc + (s.legHighwayKm / 100) * R100 + (segCityWithoutDetour / 100) * cityR100;
+  }, 0);
+  const totalFuelBurnedLiters = roundTo(
+    totalLegsBurnLiters + totalDetourBurnLiters + finalLegBurn.totalFuelLiters,
+    2
+  );
   const totalFuelBurnedGal = roundTo(litersToGallons(totalFuelBurnedLiters), 2);
 
   const arrivalFuelLiters = roundTo(fStart + totalFuelPurchasedLiters - totalFuelBurnedLiters, 2);
@@ -377,6 +481,7 @@ export function optimizeRefuelingSchedule(input: OptimizationInput): Optimizatio
     routeCoordinates,
     C,
     R100,
+    cityR100,
     fStart,
     fMinStop,
     stops,
@@ -401,6 +506,12 @@ export function optimizeRefuelingSchedule(input: OptimizationInput): Optimizatio
     arrivalFuelLiters,
     arrivalFuelGal,
     arrivalFuelPercent,
+    finalLegHighwayKm: finalLegBurn.highwayKm,
+    finalLegCityKm: finalLegBurn.cityKm,
+    finalLegHighwayMiles: roundTo(kmToMiles(finalLegBurn.highwayKm), 1),
+    finalLegCityMiles: roundTo(kmToMiles(finalLegBurn.cityKm), 1),
+    totalHighwayKm,
+    totalCityKm,
     telemetry,
     executionTimeMs: roundTo(performance.now() - startTime, 2),
   };
@@ -415,6 +526,7 @@ function solveModeBPartialLookahead(params: {
   totalDistanceKm: number;
   C: number;
   R100: number;
+  cityR100: number;
   fStart: number;
   fMinStop: number;
   fTargetEnd: number;
@@ -427,6 +539,7 @@ function solveModeBPartialLookahead(params: {
     totalDistanceKm,
     C,
     R100,
+    cityR100,
     fStart,
     fMinStop,
     fTargetEnd,
@@ -443,14 +556,17 @@ function solveModeBPartialLookahead(params: {
   };
 
   // Step 1: Select initial station to visit from Origin (0 km)
-  // Among all stations reachable from Origin with >= fMinStop, pick the cheapest effective station;
-  // or if a station can get us closer to an even cheaper one, pick the cheapest reachable from start.
   const reachableFromStart: Array<{ idx: number; arrivalFuel: number }> = [];
   for (let i = 0; i < candidates.length; i++) {
     const st = candidates[i];
-    const burnToPump =
-      computeFuelBurnedLiters(st.distanceAlongRouteKm, R100) +
-      computeFuelBurnedLiters(st.detourDistanceKm / 2, R100);
+    const burnToPump = computeSegmentFuelBurn(
+      0,
+      st.distanceAlongRouteKm,
+      totalDistanceKm,
+      R100,
+      cityR100,
+      st.detourDistanceKm / 2
+    ).totalFuelLiters;
     const arrivalFuel = fStart - burnToPump;
     if (arrivalFuel >= fMinStop - 1e-5) {
       reachableFromStart.push({ idx: i, arrivalFuel: Math.max(fMinStop, arrivalFuel) });
@@ -476,7 +592,7 @@ function solveModeBPartialLookahead(params: {
     visited.add(currIdx);
 
     const currStation = candidates[currIdx];
-    const halfDetourBurn = computeFuelBurnedLiters(currStation.detourDistanceKm / 2, R100);
+    const halfDetourBurn = (currStation.detourDistanceKm / 2 / 100) * cityR100;
     const maxPurchaseByCap = computeMaxLitersByDollarCap(
       maxDollarPerStop,
       currStation,
@@ -486,9 +602,15 @@ function solveModeBPartialLookahead(params: {
     const maxPossibleDepartureAtPump = Math.min(C, currArrivalFuel + maxPurchaseByCap);
 
     // Fuel needed at pump of currStation to reach Destination B with fTargetEnd
-    const distToDestKm = totalDistanceKm - currStation.distanceAlongRouteKm;
-    const fuelNeededForDest =
-      halfDetourBurn + computeFuelBurnedLiters(distToDestKm, R100) + fTargetEnd;
+    const destBurn = computeSegmentFuelBurn(
+      currStation.distanceAlongRouteKm,
+      totalDistanceKm,
+      totalDistanceKm,
+      R100,
+      cityR100,
+      0
+    ).totalFuelLiters;
+    const fuelNeededForDest = halfDetourBurn + destBurn + fTargetEnd;
 
     // Scan all stations j > currIdx reachable with maxPossibleDepartureAtPump
     const reachableAhead: Array<{
@@ -498,11 +620,15 @@ function solveModeBPartialLookahead(params: {
 
     for (let j = currIdx + 1; j < candidates.length; j++) {
       const nextSt = candidates[j];
-      const legDistKm = nextSt.distanceAlongRouteKm - currStation.distanceAlongRouteKm;
-      const burnPumpToNextPump =
-        halfDetourBurn +
-        computeFuelBurnedLiters(legDistKm, R100) +
-        computeFuelBurnedLiters(nextSt.detourDistanceKm / 2, R100);
+      const legBurn = computeSegmentFuelBurn(
+        currStation.distanceAlongRouteKm,
+        nextSt.distanceAlongRouteKm,
+        totalDistanceKm,
+        R100,
+        cityR100,
+        nextSt.detourDistanceKm / 2
+      ).totalFuelLiters;
+      const burnPumpToNextPump = halfDetourBurn + legBurn;
       const neededAtCurrPump = burnPumpToNextPump + fMinStop;
 
       if (neededAtCurrPump <= maxPossibleDepartureAtPump + 1e-5) {
@@ -526,7 +652,6 @@ function solveModeBPartialLookahead(params: {
 
     if (cheaperAhead) {
       // Case 1: A cheaper station S_j is within range!
-      // Purchase ONLY enough fuel at S_i to reach S_j with exactly f_min_stop reserve.
       const nextSt = candidates[cheaperAhead.j];
       targetDepartureFuelAtPump = Math.max(
         currArrivalFuel,
@@ -575,7 +700,15 @@ function solveModeBPartialLookahead(params: {
     if (fuelPurchasedLiters > 0.05) {
       const stepCost = computeFuelCost(fuelPurchasedLiters, currStation, unitSystem);
       const legDistKm = currStation.distanceAlongRouteKm - prevDistKm;
-      const detourBurnLiters = computeFuelBurnedLiters(currStation.detourDistanceKm, R100);
+      const legBurn = computeSegmentFuelBurn(
+        prevDistKm,
+        currStation.distanceAlongRouteKm,
+        totalDistanceKm,
+        R100,
+        cityR100,
+        currStation.detourDistanceKm
+      );
+      const detourBurnLiters = (currStation.detourDistanceKm / 100) * cityR100;
 
       stops.push({
         stopNumber: stops.length + 1,
@@ -596,6 +729,10 @@ function solveModeBPartialLookahead(params: {
         detourFuelBurnedGal: roundTo(litersToGallons(detourBurnLiters), 2),
         legDistanceFromPrevKm: roundTo(legDistKm, 1),
         legDistanceFromPrevMiles: roundTo(kmToMiles(legDistKm), 1),
+        legHighwayKm: legBurn.highwayKm,
+        legCityKm: legBurn.cityKm,
+        legHighwayMiles: roundTo(kmToMiles(legBurn.highwayKm), 1),
+        legCityMiles: roundTo(kmToMiles(legBurn.cityKm), 1),
         policyReason,
         policyExplanation,
       });
@@ -609,11 +746,15 @@ function solveModeBPartialLookahead(params: {
     }
 
     const nextStation = candidates[nextIdx];
-    const legKm = nextStation.distanceAlongRouteKm - currStation.distanceAlongRouteKm;
-    const burnToNextPump =
-      halfDetourBurn +
-      computeFuelBurnedLiters(legKm, R100) +
-      computeFuelBurnedLiters(nextStation.detourDistanceKm / 2, R100);
+    const interBurn = computeSegmentFuelBurn(
+      currStation.distanceAlongRouteKm,
+      nextStation.distanceAlongRouteKm,
+      totalDistanceKm,
+      R100,
+      cityR100,
+      nextStation.detourDistanceKm / 2
+    ).totalFuelLiters;
+    const burnToNextPump = halfDetourBurn + interBurn;
 
     currArrivalFuel = Math.max(fMinStop, targetDepartureFuelAtPump - burnToNextPump);
     currIdx = nextIdx;
@@ -632,6 +773,7 @@ function solveModeAFillOrCapDP(params: {
   totalDistanceKm: number;
   C: number;
   R100: number;
+  cityR100: number;
   fStart: number;
   fMinStop: number;
   fTargetEnd: number;
@@ -644,6 +786,7 @@ function solveModeAFillOrCapDP(params: {
     totalDistanceKm,
     C,
     R100,
+    cityR100,
     fStart,
     fMinStop,
     fTargetEnd,
@@ -672,9 +815,14 @@ function solveModeAFillOrCapDP(params: {
   // Initialize transitions from Origin (-1) to Station i
   for (let i = 0; i < n; i++) {
     const st = candidates[i];
-    const burnToPump =
-      computeFuelBurnedLiters(st.distanceAlongRouteKm, R100) +
-      computeFuelBurnedLiters(st.detourDistanceKm / 2, R100);
+    const burnToPump = computeSegmentFuelBurn(
+      0,
+      st.distanceAlongRouteKm,
+      totalDistanceKm,
+      R100,
+      cityR100,
+      st.detourDistanceKm / 2
+    ).totalFuelLiters;
     const arrivalFuel = fStart - burnToPump;
 
     if (arrivalFuel >= fMinStop - 1e-5) {
@@ -702,22 +850,26 @@ function solveModeAFillOrCapDP(params: {
   for (let i = 0; i < n; i++) {
     if (dp[i].size === 0) continue;
     const stI = candidates[i];
-    const halfDetourI = computeFuelBurnedLiters(stI.detourDistanceKm / 2, R100);
+    const halfDetourI = (stI.detourDistanceKm / 2 / 100) * cityR100;
 
     for (const [depBucket, stateI] of dp[i].entries()) {
       const depFuelI = stateI.departureFuelAtPump;
 
       for (let j = i + 1; j < n; j++) {
         const stJ = candidates[j];
-        const legKm = stJ.distanceAlongRouteKm - stI.distanceAlongRouteKm;
         const burnItoJ =
           halfDetourI +
-          computeFuelBurnedLiters(legKm, R100) +
-          computeFuelBurnedLiters(stJ.detourDistanceKm / 2, R100);
+          computeSegmentFuelBurn(
+            stI.distanceAlongRouteKm,
+            stJ.distanceAlongRouteKm,
+            totalDistanceKm,
+            R100,
+            cityR100,
+            stJ.detourDistanceKm / 2
+          ).totalFuelLiters;
 
         const arrivalJ = depFuelI - burnItoJ;
         if (arrivalJ < fMinStop - 1e-5) {
-          // Since stations are sorted by distance, if depFuelI is C and even straight line exceeds, we can continue
           continue;
         }
 
@@ -754,9 +906,16 @@ function solveModeAFillOrCapDP(params: {
   for (let k = 0; k < n; k++) {
     if (dp[k].size === 0) continue;
     const stK = candidates[k];
-    const halfDetourK = computeFuelBurnedLiters(stK.detourDistanceKm / 2, R100);
-    const distToDest = totalDistanceKm - stK.distanceAlongRouteKm;
-    const burnToDest = halfDetourK + computeFuelBurnedLiters(distToDest, R100);
+    const halfDetourK = (stK.detourDistanceKm / 2 / 100) * cityR100;
+    const destBurn = computeSegmentFuelBurn(
+      stK.distanceAlongRouteKm,
+      totalDistanceKm,
+      totalDistanceKm,
+      R100,
+      cityR100,
+      0
+    ).totalFuelLiters;
+    const burnToDest = halfDetourK + destBurn;
 
     for (const [bucket, stateK] of dp[k].entries()) {
       const finalArrivalFuel = stateK.departureFuelAtPump - burnToDest;
@@ -794,10 +953,18 @@ function solveModeAFillOrCapDP(params: {
   return chain.map((item, idx) => {
     const st = candidates[item.stationIdx];
     const s = item.state;
-    const halfDetourBurn = computeFuelBurnedLiters(st.detourDistanceKm / 2, R100);
+    const halfDetourBurn = (st.detourDistanceKm / 2 / 100) * cityR100;
     const depHighway = Math.max(0, s.departureFuelAtPump - halfDetourBurn);
-    const detourBurn = computeFuelBurnedLiters(st.detourDistanceKm, R100);
-    const legKm = st.distanceAlongRouteKm - prevDistKm;
+    const detourBurn = (st.detourDistanceKm / 100) * cityR100;
+    const legDistKm = st.distanceAlongRouteKm - prevDistKm;
+    const legBurn = computeSegmentFuelBurn(
+      prevDistKm,
+      st.distanceAlongRouteKm,
+      totalDistanceKm,
+      R100,
+      cityR100,
+      st.detourDistanceKm
+    );
     prevDistKm = st.distanceAlongRouteKm;
 
     const isCapped = s.departureFuelAtPump < C - 0.05 && maxDollarPerStop !== null;
@@ -820,8 +987,12 @@ function solveModeAFillOrCapDP(params: {
       detourMinutes: st.detourTimeMinutes,
       detourFuelBurnedLiters: roundTo(detourBurn, 2),
       detourFuelBurnedGal: roundTo(litersToGallons(detourBurn), 2),
-      legDistanceFromPrevKm: roundTo(legKm, 1),
-      legDistanceFromPrevMiles: roundTo(kmToMiles(legKm), 1),
+      legDistanceFromPrevKm: roundTo(legDistKm, 1),
+      legDistanceFromPrevMiles: roundTo(kmToMiles(legDistKm), 1),
+      legHighwayKm: legBurn.highwayKm,
+      legCityKm: legBurn.cityKm,
+      legHighwayMiles: roundTo(kmToMiles(legBurn.highwayKm), 1),
+      legCityMiles: roundTo(kmToMiles(legBurn.cityKm), 1),
       policyReason: isCapped ? 'capped_by_max_dollar' : 'fill_to_capacity',
       policyExplanation: isCapped
         ? `DP Optimal Stop: capped at $${maxDollarPerStop} per-stop limit.`
@@ -868,6 +1039,7 @@ function buildTelemetryProfile(
   routeCoordinates: [number, number][],
   C: number,
   R100: number,
+  cityR100: number,
   fStart: number,
   fMinStop: number,
   stops: OptimalStop[],
@@ -901,7 +1073,14 @@ function buildTelemetryProfile(
 
     // Add intermediate slope samples between lastDistKm and stopDistKm
     for (let d = lastDistKm + stepKm; d < stopDistKm - 0.5; d += stepKm) {
-      const burned = computeFuelBurnedLiters(d - lastDistKm, R100);
+      const burned = computeSegmentFuelBurn(
+        lastDistKm,
+        d,
+        totalDistanceKm,
+        R100,
+        cityR100,
+        0
+      ).totalFuelLiters;
       const remL = Math.max(0, currentFuelLiters - burned);
       const [lng, lat] = interpolatePointAlongRoute(routeCoordinates, d);
       points.push({
@@ -964,7 +1143,14 @@ function buildTelemetryProfile(
 
   // Final leg from last stop to Destination
   for (let d = lastDistKm + stepKm; d < totalDistanceKm - 0.5; d += stepKm) {
-    const burned = computeFuelBurnedLiters(d - lastDistKm, R100);
+    const burned = computeSegmentFuelBurn(
+      lastDistKm,
+      d,
+      totalDistanceKm,
+      R100,
+      cityR100,
+      0
+    ).totalFuelLiters;
     const remL = Math.max(0, currentFuelLiters - burned);
     const [lng, lat] = interpolatePointAlongRoute(routeCoordinates, d);
     points.push({
@@ -980,7 +1166,14 @@ function buildTelemetryProfile(
     });
   }
 
-  const finalBurn = computeFuelBurnedLiters(totalDistanceKm - lastDistKm, R100);
+  const finalBurn = computeSegmentFuelBurn(
+    lastDistKm,
+    totalDistanceKm,
+    totalDistanceKm,
+    R100,
+    cityR100,
+    0
+  ).totalFuelLiters;
   const finalRemL = Math.max(0, currentFuelLiters - finalBurn);
   const [endLng, endLat] = interpolatePointAlongRoute(routeCoordinates, totalDistanceKm);
 

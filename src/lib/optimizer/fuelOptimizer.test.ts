@@ -14,7 +14,7 @@ import {
   parseGoogleMapsDirectionsUrl,
 } from '../geo/urlParser';
 import { computeStationPrices, evaluateBrandHeuristics } from '../pricing/pricingEngine';
-import { optimizeRefuelingSchedule } from './fuelOptimizer';
+import { computeSegmentFuelBurn, optimizeRefuelingSchedule } from './fuelOptimizer';
 import type { PricingConfig, RawStationCandidate } from '../../types/trip';
 
 test('unit conversions are mathematically reversible and accurate', () => {
@@ -312,4 +312,62 @@ test('Optimizer returns structured UnreachableSegmentError when corridor has a D
   assert.equal(result.feasible, false);
   assert.ok(result.error !== null);
   assert.equal(result.error?.code, 'UNREACHABLE_ARRIVAL_RESERVE');
+});
+
+test('Approach B dual-efficiency profiling correctly calculates highway vs city fuel burn and splits', () => {
+  // Test segment burn calculation: 100 km corridor, 8 km urban start, 8 km urban end, 2 km detour
+  // City = 8 + 8 + 2 = 18 km, Highway = 84 km
+  const burn = computeSegmentFuelBurn(
+    0,
+    100,
+    100,
+    8.0, // Hwy: 8.0 L/100km
+    12.0, // City: 12.0 L/100km
+    2.0 // Detour: 2 km
+  );
+  assert.equal(burn.highwayKm, 84);
+  assert.equal(burn.cityKm, 18);
+  // Expected liters: (84 / 100) * 8.0 + (18 / 100) * 12.0 = 6.72 + 2.16 = 8.88 L
+  assert.ok(Math.abs(burn.totalFuelLiters - 8.88) < 1e-5);
+
+  // Full corridor optimization with dual efficiency
+  const pricedStations = computeStationPrices(
+    MOCK_CANDIDATES,
+    DEFAULT_PRICING_CONFIG,
+    'metric',
+    {}
+  );
+
+  const result = optimizeRefuelingSchedule({
+    totalDistanceKm: 542,
+    routeCoordinates: SAMPLE_ROUTE_COORDS,
+    tankCapacityLiters: 50,
+    fuelEconomyL100km: 7.5,
+    cityFuelEconomyL100km: 11.0,
+    initialFuelPercent: 35,
+    minStopReservePercent: 10,
+    targetArrivalReservePercent: 20,
+    maxDetourMinutes: 25,
+    maxDollarPerStop: null,
+    detourCostWeightPerMinute: 0,
+    policy: 'mode_b_partial_lookahead',
+    unitSystem: 'metric',
+    stations: pricedStations,
+  });
+
+  assert.equal(result.feasible, true);
+  assert.ok(result.stops.length >= 1);
+
+  // Check that stop has leg highway and city splits
+  const stop1 = result.stops[0];
+  assert.ok(typeof stop1.legHighwayKm === 'number' && stop1.legHighwayKm > 0);
+  assert.ok(typeof stop1.legCityKm === 'number' && stop1.legCityKm > 0);
+  assert.ok(typeof stop1.legHighwayMiles === 'number');
+  assert.ok(typeof stop1.legCityMiles === 'number');
+
+  // Check final leg splits
+  assert.ok(typeof result.finalLegHighwayKm === 'number' && result.finalLegHighwayKm > 0);
+  assert.ok(typeof result.finalLegCityKm === 'number' && result.finalLegCityKm > 0);
+  assert.ok(typeof result.totalHighwayKm === 'number');
+  assert.ok(typeof result.totalCityKm === 'number');
 });

@@ -17,6 +17,11 @@ export const TelemetryChart: React.FC = () => {
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [cursorPos, setCursorPos] = useState<{
+    x: number;
+    y: number;
+    containerWidth: number;
+  } | null>(null);
 
   const telemetry = optimizationResult.telemetry;
   const totalDistDisplay =
@@ -102,7 +107,9 @@ export const TelemetryChart: React.FC = () => {
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!svgRef.current || telemetry.length === 0) return;
     const rect = svgRef.current.getBoundingClientRect();
-    const relX = ((e.clientX - rect.left) / rect.width) * width;
+    const clientOffsetX = e.clientX - rect.left;
+    const clientOffsetY = e.clientY - rect.top;
+    const relX = (clientOffsetX / rect.width) * width;
     const clampedPlotX = Math.max(0, Math.min(plotW, relX - padLeft));
     const targetKm = (clampedPlotX / plotW) * routeGeometry.distanceKm;
 
@@ -116,11 +123,17 @@ export const TelemetryChart: React.FC = () => {
       }
     }
     setHoverIdx(bestIdx);
+    setCursorPos({
+      x: clientOffsetX,
+      y: clientOffsetY,
+      containerWidth: rect.width,
+    });
     setHoveredDistanceKm(telemetry[bestIdx].distanceKm);
   };
 
   const handleMouseLeave = () => {
     setHoverIdx(null);
+    setCursorPos(null);
     setHoveredDistanceKm(null);
   };
 
@@ -159,22 +172,7 @@ export const TelemetryChart: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          {activeHoverPoint && (
-            <div className="text-xs font-mono text-slate-200 tabular-nums">
-              At{' '}
-              {unitSystem === 'metric'
-                ? `${activeHoverPoint.distanceKm} km`
-                : `${activeHoverPoint.distanceMiles} mi`}
-              :{' '}
-              <span className="text-emerald-400 font-semibold">
-                {unitSystem === 'metric'
-                  ? `${activeHoverPoint.fuelRemainingLiters} L`
-                  : `${activeHoverPoint.fuelRemainingGal} gal`}{' '}
-                ({activeHoverPoint.fuelRemainingPercent}%)
-              </span>
-            </div>
-          )}
+        <div className="flex items-center gap-3 shrink-0">
           <button
             type="button"
             aria-label={
@@ -195,15 +193,38 @@ export const TelemetryChart: React.FC = () => {
       {/* Interactive SVG Area Chart */}
       {isTelemetryExpanded && (
         <div className="px-3 py-1.5">
-          <svg
-            ref={svgRef}
-            viewBox={`0 0 ${width} ${height}`}
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
-            className="w-full h-[155px] overflow-visible cursor-crosshair"
-            role="img"
-            aria-label="Fuel tank level versus route distance telemetry chart"
-          >
+          <div className="relative">
+            {activeHoverPoint && cursorPos && (
+              <div
+                className="pointer-events-none absolute z-30 px-2.5 py-1 rounded-md bg-slate-900/95 border border-slate-700/90 shadow-lg backdrop-blur-sm text-xs font-mono text-slate-200 tabular-nums whitespace-nowrap"
+                style={{
+                  left: `${Math.max(105, Math.min(cursorPos.containerWidth - 105, cursorPos.x))}px`,
+                  top: `${Math.max(24, cursorPos.y)}px`,
+                  transform: 'translate(-50%, -120%)',
+                }}
+              >
+                At{' '}
+                {unitSystem === 'metric'
+                  ? `${activeHoverPoint.distanceKm} km`
+                  : `${activeHoverPoint.distanceMiles} mi`}
+                :{' '}
+                <span className="text-emerald-400 font-semibold">
+                  {unitSystem === 'metric'
+                    ? `${activeHoverPoint.fuelRemainingLiters} L`
+                    : `${activeHoverPoint.fuelRemainingGal} gal`}{' '}
+                  ({activeHoverPoint.fuelRemainingPercent}%)
+                </span>
+              </div>
+            )}
+            <svg
+              ref={svgRef}
+              viewBox={`0 0 ${width} ${height}`}
+              onMouseMove={handleMouseMove}
+              onMouseLeave={handleMouseLeave}
+              className="w-full h-[155px] overflow-visible cursor-crosshair"
+              role="img"
+              aria-label="Fuel tank level versus route distance telemetry chart"
+            >
             <defs>
               <linearGradient id="fuelAreaGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#10b981" stopOpacity="0.38" />
@@ -358,7 +379,8 @@ export const TelemetryChart: React.FC = () => {
                 />
               </g>
             )}
-          </svg>
+            </svg>
+          </div>
         </div>
       )}
     </div>

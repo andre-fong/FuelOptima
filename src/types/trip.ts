@@ -121,6 +121,7 @@ export interface OptimizationInput {
   routeCoordinates: [number, number][];
   tankCapacityLiters: number;
   fuelEconomyL100km: number;
+  cityFuelEconomyL100km?: number;
   initialFuelPercent: number; // 0 to 100
   minStopReservePercent: number; // 0 to 50
   targetArrivalReservePercent: number; // 0 to 90
@@ -151,6 +152,10 @@ export interface OptimalStop {
   detourFuelBurnedGal: number;
   legDistanceFromPrevKm: number;
   legDistanceFromPrevMiles: number;
+  legHighwayKm: number;
+  legCityKm: number;
+  legHighwayMiles: number;
+  legCityMiles: number;
   policyReason:
     | 'cheaper_station_ahead'
     | 'fill_to_capacity'
@@ -212,6 +217,12 @@ export interface OptimizationResult {
   arrivalFuelLiters: number;
   arrivalFuelGal: number;
   arrivalFuelPercent: number;
+  finalLegHighwayKm?: number;
+  finalLegCityKm?: number;
+  finalLegHighwayMiles?: number;
+  finalLegCityMiles?: number;
+  totalHighwayKm?: number;
+  totalCityKm?: number;
   telemetry: TelemetryPoint[];
   executionTimeMs: number;
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  BookOpen,
   Check,
   DollarSign,
   Gauge,
@@ -15,6 +16,7 @@ import { useTripStore } from '../store/useTripStore';
 export const SettingsModal: React.FC = () => {
   const isSettingsOpen = useTripStore((s) => s.isSettingsOpen);
   const setIsSettingsOpen = useTripStore((s) => s.setIsSettingsOpen);
+  const setIsOnboardingOpen = useTripStore((s) => s.setIsOnboardingOpen);
 
   const unitSystem = useTripStore((s) => s.unitSystem);
   const setUnitSystem = useTripStore((s) => s.setUnitSystem);
@@ -460,38 +462,53 @@ export const SettingsModal: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3.5 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              resetSettingsToDefault();
-              setJustReset(true);
-              setTimeout(() => setJustReset(false), 2000);
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer border ${
-              justReset
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800 border-slate-800 hover:border-slate-700'
-            }`}
-            title="Revert to Metric, Mode B, 20 min detour limit, and no per-stop max dollar cap"
-          >
-            {justReset ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Defaults restored</span>
-              </>
-            ) : (
-              <>
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset to default</span>
-              </>
-            )}
-          </button>
+        <div className="px-6 py-3.5 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                resetSettingsToDefault();
+                setJustReset(true);
+                setTimeout(() => setJustReset(false), 2000);
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer border ${
+                justReset
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800 border-slate-800 hover:border-slate-700'
+              }`}
+              title="Revert to Metric, Mode B, 20 min detour limit, and no per-stop max dollar cap"
+            >
+              {justReset ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Defaults restored</span>
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset to default</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsSettingsOpen(false);
+                setIsOnboardingOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer border text-slate-300 hover:text-slate-100 hover:bg-slate-800 border-slate-800 hover:border-slate-700"
+              title="Reopen the 3-step onboarding walkthrough"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+              <span>View Onboarding</span>
+            </button>
+          </div>
 
           <button
             type="button"
             onClick={() => setIsSettingsOpen(false)}
-            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-semibold rounded-lg transition-colors cursor-pointer shrink-0"
           >
             Done
           </button>
